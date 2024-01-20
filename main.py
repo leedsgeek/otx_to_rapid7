@@ -25,7 +25,6 @@ def get_pulse():
   except requests.exceptions.ConnectionError as conerr: 
     print("Connection error") 
 
-  print(response.json())
   # Gets the response and converts to json to parse the data
   return response.json()
 
