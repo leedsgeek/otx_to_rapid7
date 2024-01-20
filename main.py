@@ -3,7 +3,7 @@ import logging
 import json
 
 rapid7_api_key = '[Enter rapid7 api key]'
-otx_key = '[Enter OTX API Key]'
+otx_key = '[Enter ATX API Key]'
 
 file_types = ['FileHash-MD5']
 
@@ -14,8 +14,19 @@ def get_pulse():
   headers = {
     'X-OTX-API-KEY': otx_key
   }
+  try: 
+    response = requests.request("GET", url, headers=headers, data=payload, timeout = 10, verify = True) 
+    response.raise_for_status() 
+  except requests.exceptions.HTTPError as errh: 
+    print("HTTP Error") 
+    print(errh.args[0]) 
+  except requests.exceptions.ReadTimeout as errrt: 
+    print("Time out") 
+  except requests.exceptions.ConnectionError as conerr: 
+    print("Connection error") 
+
+  print(response.json())
   # Gets the response and converts to json to parse the data
-  response = requests.request("GET", url, headers=headers, data=payload)
   return response.json()
 
 # Creates a list of ID to track and get indicators
@@ -72,9 +83,9 @@ def post_threat(threat,x):
 
 pulsedata = get_pulse()
 # pulse_id =["658481716d9034bb0d52212d"] # test ID which contains all indicators
-pulse_id = log_ids(pulsedata)
-if not pulse_id:
-  print("Not IDs Found")
-else:
-  print("List Not Empty")
-  get_indicators(pulse_id)
+#pulse_id = log_ids(pulsedata)
+#if not pulse_id:
+#  print("Not IDs Found")
+#else:
+#  print("List Not Empty")
+#  get_indicators(pulse_id)
