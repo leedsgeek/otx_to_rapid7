@@ -1,12 +1,27 @@
 import requests
-import logging
 import json
-
-rapid7_api_key = '[Enter rapid7 api key]'
-otx_key = '[Enter ATX API Key]'
-
+from datetime import datetime
+import time
+import logging
+import sys
+# Logging Module
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
+stdout_handler = logging.StreamHandler(sys.stdout)
+stdout_handler.setLevel(logging.DEBUG)
+stdout_handler.setFormatter(formatter)
+file_handler = logging.FileHandler('./otx_rapid7.log')
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+logger.addHandler(stdout_handler)
+# Global Variables
+rapid7_api_key = '[enter rapid7 api key]'
+otx_key = '[Enter otx api key]'
 file_types = ['FileHash-MD5']
-
+region = '[enter region]'
+log_id_post = []
 # Get Only Subscribed Pulses
 def get_pulse():
   url = "https://otx.alienvault.com/api/v1/pulses/subscribed"
@@ -16,15 +31,13 @@ def get_pulse():
   }
   try: 
     response = requests.request("GET", url, headers=headers, data=payload, timeout = 10, verify = True) 
-    response.raise_for_status() 
+    logger.info("Successfully Connected", str(url))
   except requests.exceptions.HTTPError as errh: 
-    print("HTTP Error") 
-    print(errh.args[0]) 
+    logger.error(errh.args[0])
   except requests.exceptions.ReadTimeout as errrt: 
-    print("Time out") 
+    logger.error("Request Timed Out")
   except requests.exceptions.ConnectionError as conerr: 
-    print("Connection error") 
-
+    logger.error("Failed to Connect to alienvault")
   # Gets the response and converts to json to parse the data
   return response.json()
 
@@ -40,17 +53,25 @@ def log_ids(pulsedata):
 
 # creates a dict with all the data for a rapid7 request and then executes one its turned it to json
 def get_indicators(pulse_id):
-  indicator_com = {}
   for x in pulse_id:
+    # Lists of values to be populated
     filehash = []
     domain = []
-    URL = []
+    www = []
     url = "https://otx.alienvault.com/api/v1/pulses/"+x
     payload = {}
     headers = { 'X-OTX-API-KEY': otx_key }
-    response = requests.request("GET", url, headers=headers, data=payload)
+    try: 
+      response = requests.request("GET", url, headers=headers, data=payload, timeout = 10, verify = True)
+      logger.info(str(url)) 
+    except requests.exceptions.HTTPError as errh: 
+      logger.error(errh.args[0])
+    except requests.exceptions.ReadTimeout as errrt: 
+      logger.error("Request Timed Out")
+    except requests.exceptions.ConnectionError as conerr: 
+      logger.error("Failed to Connect to alienvault")
     resp = response.json()
-    threat = {"threat": resp['name'],"note": "Provided By OTX by AdareSEC"}
+    threat = {"threat": resp['name'],"note": "Information Scrape from OTX add to R7 By Adaresec"}
     for x in resp["indicators"]:
       # This collects file hashes
       if x['type'] in file_types:
@@ -60,31 +81,45 @@ def get_indicators(pulse_id):
           domain.append(x["indicator"])
       # Collects URLs
       if x['type'] == "URL":
-          URL.append(x["indicator"])
-      
+          www.append(x["indicator"])
     # Creates the payload to send to rapid7 os return this
-    threat['indicators']= {"hashes": filehash, "domain_names":domain, "urls":URL}
+    threat['indicators']= {"hashes": filehash, "domain_names":domain, "urls":www}
     post_threat(threat,x)
-
+# Attempts to publish threat to Rapid7
 def post_threat(threat,x):
-  print(x["id"])
-  url = "https://[Enter Region].api.insight.rapid7.com/idr/v1/customthreats"
-  payload = json.dumps(threat)
-  print(payload)
-  headers = {
-    'X-API-Key': rapid7_api_key,
-    'Content-Type': 'application/json',
-  }
-  
-  #response = requests.request("POST", url, headers=headers, data=payload)
-  #print(response.text)
-  #print(threat)
+  if x['id'] in log_id_post:
+    logger.info(str(x['id']), "Processed Already")
+  else:
+    url = "https://"+region+".api.insight.rapid7.com/idr/v1/customthreats"
+    payload = json.dumps(threat)
+    headers = {
+      'X-API-Key': rapid7_api_key,
+      'Content-Type': 'application/json',
+    }
+    try: 
+      response = requests.request("POST", url, headers=headers, data=payload, timeout = 10)
+      logger.info(str(url))
+    except requests.exceptions.HTTPError as errh: 
+      logger.error(errh.args[0])
+    except requests.exceptions.ReadTimeout as errrt: 
+      logger.error("Request Timed Out")
+    except requests.exceptions.ConnectionError as conerr: 
+      logger.error("Failed to Connect to Rapid7")
+    response = requests.request("POST", url, headers=headers, data=payload)
+    if response.status_code in ['200','400']:
+      log_id_post.append(x['id'])
+      print(log_id_post)
+    else:
+      logger.error("Unknown Response Code")    
 
-pulsedata = get_pulse()
-# pulse_id =["658481716d9034bb0d52212d"] # test ID which contains all indicators
-#pulse_id = log_ids(pulsedata)
-#if not pulse_id:
-#  print("Not IDs Found")
-#else:
-#  print("List Not Empty")
-#  get_indicators(pulse_id)
+while True:
+  pulsedata = get_pulse()
+  # pulse_id =["658481716d9034bb0d52212d"] # test ID which contains all indicators
+  pulse_id = log_ids(pulsedata)
+  if not pulse_id:
+    print("Not IDs Found")
+  else:
+    print("List Not Empty")
+    get_indicators(pulse_id)
+    print("sleeping")
+    time.sleep(60)
